@@ -1,0 +1,4 @@
+manifest_version: "1.0"
+environment: "prod"
+release_id: "bootstrap-prod"
+notes: "Placeholder manifest for CI and initial scaffolding."

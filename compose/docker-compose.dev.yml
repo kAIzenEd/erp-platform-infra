@@ -1,0 +1,8 @@
+include:
+  - ./common/docker-compose.base.yml
+
+services:
+  web:
+    environment:
+      - APP_ENV=dev
+      - DEVELOPER_MODE=1

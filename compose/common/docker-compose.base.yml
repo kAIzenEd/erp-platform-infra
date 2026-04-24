@@ -1,0 +1,105 @@
+services:
+  db:
+    image: mariadb:10.6
+    container_name: ${STACK_NAME}_db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - backend
+
+  redis-cache:
+    image: redis:7-alpine
+    container_name: ${STACK_NAME}_redis_cache
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - backend
+
+  redis-queue:
+    image: redis:7-alpine
+    container_name: ${STACK_NAME}_redis_queue
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - backend
+
+  web:
+    image: ${FRAPPE_IMAGE}
+    container_name: ${STACK_NAME}_web
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis-cache
+      - redis-queue
+    env_file:
+      - ${ENV_FILE}
+    ports:
+      - "${WEB_PORT}:8000"
+    volumes:
+      - sites_data:/home/frappe/frappe-bench/sites
+      - logs_data:/home/frappe/frappe-bench/logs
+    networks:
+      - backend
+      - frontend
+
+  worker-default:
+    image: ${FRAPPE_IMAGE}
+    container_name: ${STACK_NAME}_worker_default
+    restart: unless-stopped
+    depends_on:
+      - web
+    env_file:
+      - ${ENV_FILE}
+    command: ["bench", "worker", "--queue", "default,short"]
+    volumes:
+      - sites_data:/home/frappe/frappe-bench/sites
+      - logs_data:/home/frappe/frappe-bench/logs
+    networks:
+      - backend
+
+  worker-long:
+    image: ${FRAPPE_IMAGE}
+    container_name: ${STACK_NAME}_worker_long
+    restart: unless-stopped
+    depends_on:
+      - web
+    env_file:
+      - ${ENV_FILE}
+    command: ["bench", "worker", "--queue", "long,default"]
+    volumes:
+      - sites_data:/home/frappe/frappe-bench/sites
+      - logs_data:/home/frappe/frappe-bench/logs
+    networks:
+      - backend
+
+  scheduler:
+    image: ${FRAPPE_IMAGE}
+    container_name: ${STACK_NAME}_scheduler
+    restart: unless-stopped
+    depends_on:
+      - web
+    env_file:
+      - ${ENV_FILE}
+    command: ["bench", "schedule"]
+    volumes:
+      - sites_data:/home/frappe/frappe-bench/sites
+      - logs_data:/home/frappe/frappe-bench/logs
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+  frontend:
+    driver: bridge
+
+volumes:
+  db_data:
+  sites_data:
+  logs_data:

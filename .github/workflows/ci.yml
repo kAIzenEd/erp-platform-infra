@@ -1,0 +1,39 @@
+name: infra-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main, "release/**"]
+
+jobs:
+  compose-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose files
+        run: |
+          docker compose -f compose/common/docker-compose.base.yml config > /dev/null
+          docker compose -f compose/docker-compose.dev.yml config > /dev/null
+          docker compose -f compose/docker-compose.staging.yml config > /dev/null
+          docker compose -f compose/docker-compose.prod.yml config > /dev/null
+
+  deploy-dry-run:
+    runs-on: ubuntu-latest
+    needs: [compose-validate]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check manifests exist
+        run: |
+          test -f manifests/dev.release.yaml
+          test -f manifests/staging.release.yaml
+          test -f manifests/prod.release.yaml
+
+  smoke-test-plan-check:
+    runs-on: ubuntu-latest
+    needs: [deploy-dry-run]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure runbooks present
+        run: |
+          test -f docs/runbooks/cutover-checklist.md
+          test -f docs/runbooks/rollback-checklist.md

@@ -1,0 +1,25 @@
+name: deploy-prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Signed release tag (e.g. v1.3.0 / infra-v1.3.0)"
+        required: true
+        type: string
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify signed tag
+        run: |
+          git fetch --tags
+          git tag -v "${{ inputs.release_tag }}"
+      - name: Deploy to Production
+        run: echo "Deploy using manifests/prod.release.yaml pinned to signed tags"
+      - name: Post-deploy smoke
+        run: |
+          echo "Run login, admissions ingest, queue, scheduler, transcript QR checks"

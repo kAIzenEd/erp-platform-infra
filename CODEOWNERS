@@ -1,0 +1,4 @@
+* @ets-it-lead @ets-devops @ets-security
+/manifests/ @ets-release-managers @ets-it-lead
+/scripts/deploy/ @ets-devops @ets-release-managers
+/security/ @ets-security @ets-it-lead

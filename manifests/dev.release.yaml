@@ -1,0 +1,4 @@
+manifest_version: "1.0"
+environment: "dev"
+release_id: "bootstrap-dev"
+notes: "Placeholder manifest for CI and initial scaffolding."

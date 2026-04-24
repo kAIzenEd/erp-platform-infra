@@ -7,11 +7,17 @@ if [[ $# -ne 1 ]]; then
 fi
 
 env_name="$1"
-compose_file="compose/docker-compose.${env_name}.yml"
+base_compose_file="compose/common/docker-compose.base.yml"
+env_compose_file="compose/docker-compose.${env_name}.yml"
 env_file="env/${env_name}/.env"
 
-if [[ ! -f "$compose_file" ]]; then
-  echo "Missing compose file: $compose_file"
+if [[ ! -f "$base_compose_file" ]]; then
+  echo "Missing compose file: $base_compose_file"
+  exit 1
+fi
+
+if [[ ! -f "$env_compose_file" ]]; then
+  echo "Missing compose file: $env_compose_file"
   exit 1
 fi
 
@@ -22,6 +28,6 @@ if [[ ! -f "$env_file" ]]; then
 fi
 
 echo "Deploying ${env_name} stack..."
-docker compose --env-file "$env_file" -f "$compose_file" up -d
+docker compose --env-file "$env_file" -f "$base_compose_file" -f "$env_compose_file" up -d
 
 echo "Deployment command completed for ${env_name}."

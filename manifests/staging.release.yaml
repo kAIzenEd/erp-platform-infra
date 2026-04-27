@@ -1,4 +1,0 @@
-manifest_version: "1.0"
-environment: "staging"
-release_id: "bootstrap-staging"
-notes: "Placeholder manifest for CI and initial scaffolding."

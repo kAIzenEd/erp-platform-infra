@@ -13,10 +13,8 @@ jobs:
       - name: Validate compose files
         run: |
           cp env/dev/.env.example env/dev/.env
-          cp env/staging/.env.example env/staging/.env
           cp env/prod/.env.example env/prod/.env
           docker compose --env-file env/dev/.env -f compose/common/docker-compose.base.yml -f compose/docker-compose.dev.yml config > /dev/null
-          docker compose --env-file env/staging/.env -f compose/common/docker-compose.base.yml -f compose/docker-compose.staging.yml config > /dev/null
           docker compose --env-file env/prod/.env -f compose/common/docker-compose.base.yml -f compose/docker-compose.prod.yml config > /dev/null
 
   deploy-dry-run:
@@ -27,7 +25,6 @@ jobs:
       - name: Check manifests exist
         run: |
           test -f manifests/dev.release.yaml
-          test -f manifests/staging.release.yaml
           test -f manifests/prod.release.yaml
 
   smoke-test-plan-check:

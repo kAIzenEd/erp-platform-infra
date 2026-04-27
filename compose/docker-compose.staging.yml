@@ -1,5 +1,0 @@
-services:
-  web:
-    environment:
-      - APP_ENV=staging
-      - DEVELOPER_MODE=0

@@ -1,0 +1,5 @@
+# Local secrets (never commit)
+env/*/.env
+
+# Optional: if you clone frappe_docker inside this repo by mistake
+frappe_docker/

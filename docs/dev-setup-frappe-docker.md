@@ -44,6 +44,23 @@ When `create-site` completes successfully:
 - Open **http://localhost:8080** (upstream default for pwd).
 - Login: **Administrator** / **admin** (unless you changed defaults in that compose file).
 
+### Day-1 health verification commands
+
+Run these after startup to validate baseline runtime health:
+
+```bash
+cd ~/dev/frappe_docker
+docker compose -f pwd.yml ps
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080
+curl -s http://localhost:8080/api/method/ping
+```
+
+Expected:
+
+- Frontend HTTP status `200`
+- Ping response `{"message":"pong"}`
+- `scheduler`, `queue-short`, and `queue-long` services are `Up` in `docker compose ... ps`
+
 ### If the UI looks wrong
 
 1. Use **exactly** `http://localhost:8080` first — not a random host name unless the site was created for that host.

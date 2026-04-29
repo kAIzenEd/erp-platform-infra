@@ -21,6 +21,13 @@ Follow the single canonical guide:
 2. Clone `frappe_docker` **outside** this repo (sibling directory is fine), for example `~/dev/frappe_docker`.
 3. Open [docs/dev-setup-frappe-docker.md](docs/dev-setup-frappe-docker.md) and run the **Quick test** or **Full development** path — pick one and stick to it.
 
+## Day-1 runbook links
+
+- Dev setup and runtime commands: [docs/dev-setup-frappe-docker.md](docs/dev-setup-frappe-docker.md)
+- Operational checks and reset flow:
+  - [docs/runbooks/cutover-checklist.md](docs/runbooks/cutover-checklist.md)
+  - [docs/runbooks/rollback-checklist.md](docs/runbooks/rollback-checklist.md)
+
 ## Repo layout
 
 - `compose/` — Compose experiments for non-Dev environments (see [compose/README.md](compose/README.md)). **Not** the supported local ERPNext dev stack.

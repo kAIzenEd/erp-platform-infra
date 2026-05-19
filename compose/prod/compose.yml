@@ -4,7 +4,8 @@
 # Mirrors the dev stack (frappe/erpnext:v16.15.1, mariadb:11.8, redis:6.2-alpine)
 # so backups taken on dev are restorable here, with prod-shaped changes:
 #   - secrets read from .env (never committed)
-#   - named volumes with predictable names (db-data, sites, logs, redis-queue-data)
+#   - named volumes with predictable names (db-data, sites, logs, bench-env, redis-queue-data)
+#   - bench-env shares pip-installed custom apps across all frappe containers
 #   - restart: unless-stopped on long-running services
 #   - log rotation (max 10MB × 3 files per service)
 #   - custom apps bind-mounted from ${REPOS_ROOT} on the host — deploy = git pull + migrate + restart
@@ -40,10 +41,11 @@ x-frappe-env: &frappe-env
   FRAPPE_REDIS_CACHE: redis://redis-cache:6379
   FRAPPE_REDIS_QUEUE: redis://redis-queue:6379
 
-# Common volumes for any service that needs the site files + logs.
+# Common volumes for any service that needs the site files + logs + shared Python env.
 x-frappe-volumes: &frappe-volumes
   - sites:/home/frappe/frappe-bench/sites
   - logs:/home/frappe/frappe-bench/logs
+  - bench-env:/home/frappe/frappe-bench/env
   - ${REPOS_ROOT}/ets_admissions:/home/frappe/frappe-bench/apps/ets_admissions
   - ${REPOS_ROOT}/ets_students:/home/frappe/frappe-bench/apps/ets_students
 
@@ -105,7 +107,9 @@ services:
     command:
       - |
         set -euo pipefail
-        ls -1 apps > sites/apps.txt
+        cd /home/frappe/frappe-bench
+        ./env/bin/pip install -q -e apps/ets_admissions -e apps/ets_students
+        printf '%s\n' frappe erpnext ets_admissions ets_students > sites/apps.txt
         bench set-config -g db_host $$DB_HOST
         bench set-config -gp db_port $$DB_PORT
         bench set-config -g redis_cache "redis://$$REDIS_CACHE"
@@ -133,6 +137,8 @@ services:
     command:
       - |
         set -euo pipefail
+        cd /home/frappe/frappe-bench
+        ./env/bin/pip install -q -e apps/ets_admissions -e apps/ets_students
         wait-for-it -t 120 db:3306
         wait-for-it -t 120 redis-cache:6379
         wait-for-it -t 120 redis-queue:6379
@@ -271,3 +277,5 @@ volumes:
     name: ${STACK_NAME}_logs
   redis-queue-data:
     name: ${STACK_NAME}_redis_queue_data
+  bench-env:
+    name: ${STACK_NAME}_bench_env

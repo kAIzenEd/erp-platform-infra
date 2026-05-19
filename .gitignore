@@ -1,9 +1,7 @@
 # Local secrets (never commit)
 env/*/.env
+compose/prod/.env
+compose/dev/.env
 
 # Optional: if you clone frappe_docker inside this repo by mistake
 frappe_docker/
-
-# macOS
-.DS_Store
-**/.DS_Store

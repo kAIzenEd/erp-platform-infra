@@ -259,4 +259,4 @@ Dev uses the same compose pattern under `compose/dev` with:
 - `STACK_NAME=ets_dev`
 - Restore from Mac backup under `/opt/aca/dev-backup/`
 
-See future runbook `ubuntu-dev-install.md` (to be added).
+See [`ubuntu-dev-install.md`](./ubuntu-dev-install.md) for dev on port 8081 + Mac backup restore.

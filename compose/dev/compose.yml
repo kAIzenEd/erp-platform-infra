@@ -1,0 +1,279 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ETS ERPNext — Dev Stack (same layout as prod; differs only via .env)
+#
+# Mirrors the dev stack (frappe/erpnext:v16.15.1, mariadb:11.8, redis:6.2-alpine)
+# so backups taken on dev are restorable here, with prod-shaped changes:
+#   - secrets read from .env (never committed)
+#   - named volumes with predictable names (db-data, sites, logs, bench-env, redis-queue-data)
+#   - bench-env shares pip-installed custom apps across all frappe containers
+#   - restart: unless-stopped on long-running services
+#   - log rotation (max 10MB × 3 files per service)
+#   - custom apps bind-mounted from ${REPOS_ROOT} on the host — deploy = git pull + migrate + restart
+#   - create-site is idempotent (only runs new-site if the site does not exist)
+#   - frontend listens only on ${WEB_PORT}, suitable for LAN exposure (no public Internet)
+#
+# Usage:
+#   cd compose/dev
+#   cp .env.example .env        # STACK_NAME=ets_dev, SITE_NAME=frontend, WEB_PORT=8081
+#   docker compose --env-file .env up -d
+#   ./scripts/dev/restore.sh /opt/aca/dev-backup   # after create-site exits 0
+#
+# See: docs/runbooks/ubuntu-dev-install.md
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-frappe-image: &frappe-image "${FRAPPE_IMAGE:-frappe/erpnext:v16.15.1}"
+
+# Log driver applied to long-running services. Keeps Docker from filling the disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Common environment for backend / workers / scheduler / websocket.
+x-frappe-env: &frappe-env
+  DB_HOST: db
+  DB_PORT: "3306"
+  MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+  MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+  FRAPPE_REDIS_CACHE: redis://redis-cache:6379
+  FRAPPE_REDIS_QUEUE: redis://redis-queue:6379
+
+# Common volumes for any service that needs the site files + logs + shared Python env.
+x-frappe-volumes: &frappe-volumes
+  - sites:/home/frappe/frappe-bench/sites
+  - logs:/home/frappe/frappe-bench/logs
+  - bench-env:/home/frappe/frappe-bench/env
+  - ${REPOS_ROOT}/ets_admissions:/home/frappe/frappe-bench/apps/ets_admissions
+  - ${REPOS_ROOT}/ets_students:/home/frappe/frappe-bench/apps/ets_students
+
+services:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Data layer
+  # ──────────────────────────────────────────────────────────────────────────
+  db:
+    image: mariadb:11.8
+    container_name: ${STACK_NAME}_db
+    restart: unless-stopped
+    networks: [frappe_network]
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql
+
+  redis-cache:
+    image: redis:6.2-alpine
+    container_name: ${STACK_NAME}_redis_cache
+    restart: unless-stopped
+    networks: [frappe_network]
+    logging: *default-logging
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  redis-queue:
+    image: redis:6.2-alpine
+    container_name: ${STACK_NAME}_redis_queue
+    restart: unless-stopped
+    networks: [frappe_network]
+    logging: *default-logging
+    volumes:
+      - redis-queue-data:/data
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # One-shot bootstrap services
+  # ──────────────────────────────────────────────────────────────────────────
+  configurator:
+    image: *frappe-image
+    container_name: ${STACK_NAME}_configurator
+    networks: [frappe_network]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        cd /home/frappe/frappe-bench
+        ./env/bin/pip install -q -e apps/ets_admissions -e apps/ets_students
+        printf '%s\n' frappe erpnext ets_admissions ets_students > sites/apps.txt
+        bench set-config -g db_host $$DB_HOST
+        bench set-config -gp db_port $$DB_PORT
+        bench set-config -g redis_cache "redis://$$REDIS_CACHE"
+        bench set-config -g redis_queue "redis://$$REDIS_QUEUE"
+        bench set-config -g redis_socketio "redis://$$REDIS_QUEUE"
+        bench set-config -gp socketio_port $$SOCKETIO_PORT
+        echo "configurator: done"
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      SOCKETIO_PORT: "9000"
+    volumes: *frappe-volumes
+
+  create-site:
+    image: *frappe-image
+    container_name: ${STACK_NAME}_create_site
+    networks: [frappe_network]
+    restart: "no"
+    depends_on:
+      configurator:
+        condition: service_completed_successfully
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        cd /home/frappe/frappe-bench
+        ./env/bin/pip install -q -e apps/ets_admissions -e apps/ets_students
+        wait-for-it -t 120 db:3306
+        wait-for-it -t 120 redis-cache:6379
+        wait-for-it -t 120 redis-queue:6379
+        start=`date +%s`
+        until [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".db_host // empty"` ]]; do
+          echo "Waiting for common_site_config.json..."
+          sleep 3
+          if (( `date +%s`-start > 120 )); then
+            echo "ERROR: common_site_config.json never appeared"
+            exit 1
+          fi
+        done
+        if [ -d "sites/${SITE_NAME}" ]; then
+          echo "create-site: site '${SITE_NAME}' already exists — skipping bench new-site"
+          exit 0
+        fi
+        echo "create-site: creating site '${SITE_NAME}'"
+        bench new-site \
+          --mariadb-user-host-login-scope='%' \
+          --admin-password=${ADMIN_PASSWORD} \
+          --db-root-username=root \
+          --db-root-password=${DB_ROOT_PASSWORD} \
+          --install-app erpnext \
+          --install-app ets_admissions \
+          --install-app ets_students \
+          --set-default \
+          ${SITE_NAME}
+        echo "create-site: done"
+    environment:
+      SITE_NAME: ${SITE_NAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes: *frappe-volumes
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Long-running services
+  # ──────────────────────────────────────────────────────────────────────────
+  backend:
+    image: *frappe-image
+    container_name: ${STACK_NAME}_backend
+    restart: unless-stopped
+    networks: [frappe_network]
+    logging: *default-logging
+    depends_on:
+      create-site:
+        condition: service_completed_successfully
+    environment: *frappe-env
+    volumes: *frappe-volumes
+
+  frontend:
+    image: *frappe-image
+    container_name: ${STACK_NAME}_frontend
+    restart: unless-stopped
+    networks: [frappe_network]
+    logging: *default-logging
+    depends_on:
+      - backend
+      - websocket
+    command: ["nginx-entrypoint.sh"]
+    environment:
+      BACKEND: backend:8000
+      FRAPPE_SITE_NAME_HEADER: ${SITE_NAME}
+      SOCKETIO: websocket:9000
+      UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
+      UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
+      UPSTREAM_REAL_IP_RECURSIVE: "off"
+      PROXY_READ_TIMEOUT: "120"
+      CLIENT_MAX_BODY_SIZE: "50m"
+    volumes: *frappe-volumes
+    # Bind only to ${BIND_ADDR} — defaults to 0.0.0.0 for LAN access.
+    # Set BIND_ADDR=127.0.0.1 in .env if you want loopback-only (e.g., for a reverse proxy in front).
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${WEB_PORT}:8080"
+
+  websocket:
+    image: *frappe-image
+    container_name: ${STACK_NAME}_websocket
+    restart: unless-stopped
+    networks: [frappe_network]
+    logging: *default-logging
+    depends_on:
+      - backend
+    command: ["node", "/home/frappe/frappe-bench/apps/frappe/socketio.js"]
+    environment: *frappe-env
+    volumes: *frappe-volumes
+
+  queue-short:
+    image: *frappe-image
+    container_name: ${STACK_NAME}_queue_short
+    restart: unless-stopped
+    networks: [frappe_network]
+    logging: *default-logging
+    depends_on:
+      - backend
+    command: ["bench", "worker", "--queue", "short,default"]
+    environment: *frappe-env
+    volumes: *frappe-volumes
+
+  queue-long:
+    image: *frappe-image
+    container_name: ${STACK_NAME}_queue_long
+    restart: unless-stopped
+    networks: [frappe_network]
+    logging: *default-logging
+    depends_on:
+      - backend
+    command: ["bench", "worker", "--queue", "long,default,short"]
+    environment: *frappe-env
+    volumes: *frappe-volumes
+
+  scheduler:
+    image: *frappe-image
+    container_name: ${STACK_NAME}_scheduler
+    restart: unless-stopped
+    networks: [frappe_network]
+    logging: *default-logging
+    depends_on:
+      - backend
+    command: ["bench", "schedule"]
+    environment: *frappe-env
+    volumes: *frappe-volumes
+
+networks:
+  frappe_network:
+    driver: bridge
+    name: ${STACK_NAME}_network
+
+# Named volumes are project-scoped, so `docker compose down -v` is the only
+# thing that nukes data. A normal `down` leaves data intact for the next `up`.
+volumes:
+  db-data:
+    name: ${STACK_NAME}_db_data
+  sites:
+    name: ${STACK_NAME}_sites
+  logs:
+    name: ${STACK_NAME}_logs
+  redis-queue-data:
+    name: ${STACK_NAME}_redis_queue_data
+  bench-env:
+    name: ${STACK_NAME}_bench_env

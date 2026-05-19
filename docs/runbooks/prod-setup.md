@@ -2,6 +2,8 @@
 
 Zero-to-running guide for standing up the production ERPNext stack on the college Linux server, plus the day-2 deploy + backup + restore procedures and the host-migration playbook.
 
+> **Ubuntu VM quick path:** for a copy-paste command sequence (validated on Ubuntu), see [`ubuntu-prod-install.md`](./ubuntu-prod-install.md).
+
 > **Audience:** the developer doing the install (you), and anyone the college appoints later to keep the stack healthy.
 >
 > **Scope:** LAN-only access for staff Desk, with optional Cloudflare Tunnel so the public website on Railway can still submit applications into PROD.

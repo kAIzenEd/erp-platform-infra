@@ -119,7 +119,22 @@ chmod +x /opt/aca/infra/scripts/dev/restore.sh
 
 When prompted, type: **`frontend`**
 
-The script runs migrate, clear-cache, `bench build`, and restarts services.
+The script runs migrate, clear-cache, restarts services, then **`scripts/dev/sync-assets-from-prod.sh`** (prod must be running).
+
+---
+
+## Phase 4b — Sync Desk assets from prod (required for correct UI)
+
+The `frappe/erpnext` **production** image has no Node.js, so `bench build` cannot rebundle CSS/JS on dev. After restore, copy pre-built `dist/` trees from prod:
+
+```bash
+chmod +x /opt/aca/infra/scripts/dev/sync-assets-from-prod.sh
+/opt/aca/infra/scripts/dev/sync-assets-from-prod.sh
+
+/opt/aca/infra/scripts/dev/verify-assets.sh
+```
+
+**Prod must be healthy first** (http://erp.aca.local:8080 looks correct).
 
 ---
 
@@ -192,7 +207,7 @@ Then repeat Phase 3 → 4.
 | Prod and dev clash | Different `STACK_NAME`, `WEB_PORT`, volumes (`ets_prod_*` vs `ets_dev_*`) |
 | Restore: wrong site | Backup must be `*-frontend-*`; `SITE_NAME=frontend` in dev `.env` |
 | 404 / site does not exist | URL must use host **frontend**, port **8081** |
-| Unstyled UI | `docker compose exec backend bench build --force` then restart frontend/backend |
+| Unstyled UI / huge icons | Run `./scripts/dev/sync-assets-from-prod.sh` (do **not** rely on `bench build` — no Node in image). Verify with `./scripts/dev/verify-assets.sh` |
 | `No module named 'ets_*'` | Re-run prod-style fix: ensure `bench-env` in `compose/dev/compose.yml`, wipe `ets_dev_bench_env`, `up -d` again |
 
 ---
@@ -213,7 +228,35 @@ docker compose --env-file .env logs -f create-site
 # type: frontend
 
 grep -q frontend /etc/hosts || echo "127.0.0.1   frontend" | sudo tee -a /etc/hosts
+/opt/aca/infra/scripts/dev/sync-assets-from-prod.sh
+/opt/aca/infra/scripts/dev/verify-assets.sh
 curl -s -H "Host: frontend" http://127.0.0.1:8081/api/method/ping
 ```
 
 Open **http://frontend:8081/desk**
+
+---
+
+## What to put on GitHub (and what not to)
+
+**Do not commit** compiled Desk assets to git:
+
+| Path | Why not in git |
+|------|----------------|
+| `sites/assets/frappe/dist/*.css` | Generated bundles; large; tied to `FRAPPE_IMAGE` tag |
+| `apps/frappe/.../public/dist/` | Same; rebuilt when Frappe version changes |
+
+**Do commit** (already in `erp-platform-infra`):
+
+- `compose/dev/compose.yml` + `compose/prod/compose.yml`
+- `scripts/dev/restore.sh`, `scripts/dev/sync-assets-from-prod.sh`
+- Mac backup stays **outside** git (`erpnext-migration-backups/` on your machine)
+- Site database backup: optional **GitHub Release** attachment or cloud storage — not in the repo
+
+**Repeatable reinstall recipe:**
+
+1. Prod up ([`ubuntu-prod-install.md`](./ubuntu-prod-install.md))
+2. Dev up + restore Mac backup (this doc)
+3. `./scripts/dev/sync-assets-from-prod.sh`
+
+**Future improvement (optional):** a custom dev Docker image built in CI with Node + `bench build` baked in — avoids prod copy; more work than the script above.

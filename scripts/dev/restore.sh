@@ -66,13 +66,20 @@ log "running bench --site $SITE_NAME restore ..."
 docker exec -i "$BACKEND_CTR" bash -lc \
   "bench --site $SITE_NAME --force restore $TMP_REMOTE/$(basename "$DB_FILE") $EXTRA"
 
-log "migrate + clear-cache + build assets"
+log "migrate + clear-cache"
 docker exec "$BACKEND_CTR" bench --site "$SITE_NAME" migrate
 docker exec "$BACKEND_CTR" bench --site "$SITE_NAME" clear-cache
-docker exec "$BACKEND_CTR" bench build --force
 
-log "restarting services"
+log "restarting services before asset sync"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_DIR/compose.yml" \
   restart backend frontend websocket queue-short queue-long scheduler
 
-log "restore complete. Open http://frontend:${WEB_PORT}/desk (add frontend to /etc/hosts)"
+SYNC_SCRIPT="$REPO_ROOT/scripts/dev/sync-assets-from-prod.sh"
+if [[ -x "$SYNC_SCRIPT" ]]; then
+  log "syncing pre-built dist/ from prod (production image has no Node for bench build)"
+  "$SYNC_SCRIPT" || log "WARN: asset sync failed — run $SYNC_SCRIPT manually after prod is healthy"
+else
+  log "WARN: run scripts/dev/sync-assets-from-prod.sh after restore if Desk UI is unstyled"
+fi
+
+log "restore complete. Open http://${SITE_NAME}:${WEB_PORT}/desk (add ${SITE_NAME} to /etc/hosts)"
